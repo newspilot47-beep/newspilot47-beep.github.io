@@ -372,7 +372,17 @@ textarea.txt-area:focus{outline:none;border-color:var(--blue);}
 /* STATE INDICATOR */
 .ratio-indicator{font-size:.55rem;padding:2px 5px;border-radius:3px;background:rgba(0,100,200,.3);border:1px solid rgba(0,150,255,.3);color:#88aaff;white-space:nowrap;}
 </style>
-</head>
+<script>
+  // Per-user link system: reads ?user=NAME from URL and stores for notifications
+  (function(){
+    try{
+      var p=new URLSearchParams(location.search);
+      var u=p.get('user')||p.get('u')||p.get('name');
+      if(u){localStorage.setItem('vz_username',decodeURIComponent(u));}
+    }catch(e){}
+  })();
+  </script>
+  </head>
 <body class="locked vz-pre-boot">
 
 <!-- ════════════════════════════════════════════
