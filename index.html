@@ -382,6 +382,23 @@ textarea.txt-area:focus{outline:none;border-color:var(--blue);}
     }catch(e){}
   })();
   </script>
+  <script>
+  // VZ_URL_TEMPLATE_LOADER — reads template from URL hash before app boots
+  (function(){
+    try{
+      var h=location.hash;
+      if(!h||h.indexOf('vzt=')<0)return;
+      var p=new URLSearchParams(h.slice(1));
+      var vzt=p.get('vzt'),uid=p.get('uid');
+      if(!vzt||!uid)return;
+      // Store in sessionStorage so vzBootstrap can pick it up
+      sessionStorage.setItem('_vzPendingTpl',vzt);
+      sessionStorage.setItem('_vzPendingUid',uid);
+      // Clean URL
+      history.replaceState(null,'',location.pathname+(location.search||''));
+    }catch(e){}
+  })();
+  </script>
   </head>
 <body class="locked vz-pre-boot">
 
@@ -940,6 +957,7 @@ if('serviceWorker' in navigator){
     <div class="vz-tpg-actions">
       <button class="cancel" onclick="vzCloseTplGen()">منسوخ</button>
       <button class="pri" onclick="vzTpgGenerate()">💾 ٺاهي ڊائونلوڊ ڪريو</button>
+        <button class="pri" onclick="vzTpgGenerateLink()" style="background:linear-gradient(135deg,#2200aa,#5500ff);margin-left:6px;">🔗 يوزر لنڪ ٺاهيو</button>
     </div>
   </div>
 </div>
@@ -10716,7 +10734,33 @@ async function vzBootstrap(){
   const offlineGate=await _vzCheckOfflineGate();
   _vzStartOfflineWatch();
   if(!offlineGate.ok){_vzKillSplash();document.body.classList.remove('vz-pre-boot');return;}
-  const state=await vzCheckLicense();
+  // VZ_URL_BOOT: load template from URL hash if present
+    try{
+      var _pTpl=sessionStorage.getItem('_vzPendingTpl');
+      var _pUid=sessionStorage.getItem('_vzPendingUid');
+      if(_pTpl&&_pUid){
+        sessionStorage.removeItem('_vzPendingTpl');sessionStorage.removeItem('_vzPendingUid');
+        var _tplObj=JSON.parse(decodeURIComponent(escape(atob(_pTpl))));
+        await _vzPut('vz_user_id',_pUid);
+        await _vzPut('template',_tplObj);
+      }
+    }catch(_e){console.warn('URL template load failed',_e);}
+    // VZ_BLOCKLIST: check if this user is blocked
+    try{
+      var _uid2=await _vzGet('vz_user_id');
+      if(_uid2){
+        var _blR=await fetch('https://raw.githubusercontent.com/newspilot47-beep/newspilot47-beep.github.io/main/blocked.json?_='+Date.now(),{cache:'no-store'}).catch(()=>null);
+        if(_blR&&_blR.ok){
+          var _bl=await _blR.json().catch(()=>({blocked:[]}));
+          if((_bl.blocked||[]).includes(_uid2)){
+            _vzKillSplash();document.body.classList.remove('vz-pre-boot');
+            document.body.innerHTML='<div style="position:fixed;inset:0;background:#07070e;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;color:#fff;text-align:center;padding:20px;"><div style="font-size:3rem;">🔒</div><h2 style="color:#ff4444;margin:0;">Access Disabled</h2><p style="color:#888;font-size:.9rem;">توهان جي رسائي بند ڪئي وئي آهي</p></div>';
+            return;
+          }
+        }
+      }
+    }catch(_be){}
+      const state=await vzCheckLicense();
   _vzStartTimeWatch();
   if(state.status==='valid'){
     _vzKillSplash();
@@ -14106,5 +14150,75 @@ if(document.readyState==='loading'){
   else{setTimeout(patch,1500);}
 })();
 </script>
-</body>
+
+  <script>
+  // ══ VZ LINK GENERATOR ══
+  window.vzTpgGenerateLink=async function(){
+    try{
+      const _genEl=G('vzTpgGeneratedId');
+      if(!_genEl||!_genEl.textContent.match(/^VZG-/)){if(_genEl)_genEl.textContent=vzTpgGenerateId();}
+      const _tplEl=G('vzTpgTemplateId');
+      if(_tplEl&&!_tplEl.textContent.match(/^VZTP-/))_tplEl.textContent=vzTpgGenerateTemplateId();
+      const templateId=(_tplEl||{textContent:vzTpgGenerateTemplateId()}).textContent.trim().toUpperCase();
+      const _prevId=(G('vzTpgPrevUserId')||{value:''}).value.trim().toUpperCase();
+      const did=_prevId&&/^VZG-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/i.test(_prevId)?_prevId:(_genEl||{textContent:''}).textContent.trim().toUpperCase();
+      if(!/^VZG-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/i.test(did)){toast('⚠️ ڪيئي غلط — طَيهر ڪوليو');return;}
+      const dur=vzTpgGetExpiryMs();
+      if(!dur){toast('⚠️ مدت چونڏيو');return;}
+      const name=G('vzTpgClient').value.trim();
+      const tplLang=(G('vzTpgLang')||{value:'sd'}).value||'sd';
+      toast('🔐 لنڪ ٹاهي رهيو آهي...');
+      const dataObj={settings:{},lang:tplLang,templateId};
+      const sec=typeof _findBfSec==='function'?_findBfSec():null;
+      if(sec){const s={};(window.BC_TPL_FIELDS||[]).forEach(k=>{if(sec[k]!==undefined)s[k]=sec[k];});dataObj.settings=s;}
+      const tpl=await vzCreateTemplate(did,dataObj,dur,name);
+      const tplStr=JSON.stringify(tpl);
+      const b64=btoa(unescape(encodeURIComponent(tplStr)));
+      const link=location.origin+location.pathname+'#vzt='+b64+'&uid='+did;
+      _vzShowLinkModal(link,did,name,dur);
+    }catch(e){toast('⚠️ غلطي: '+e.message);console.error('GenLink',e);}
+  };
+
+  window._vzShowLinkModal=function(link,uid,name,dur){
+    const ex=document.getElementById('vzLinkModal');if(ex)ex.remove();
+    const durText=dur?(dur<86400000?Math.round(dur/3600000)+' ڪلاڪ':Math.round(dur/86400000)+' ڏينهن'):'نامعلوم';
+    const m=document.createElement('div');m.id='vzLinkModal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    m.innerHTML='<div style="background:#0d0d1a;border:2px solid #5500aa;border-radius:14px;padding:22px;max-width:520px;width:100%;box-shadow:0 0 40px rgba(85,0,170,.4);">'+
+      '<h3 style="color:#cc88ff;margin:0 0 6px;font-size:1rem;">🔗 يوزر لنڪ تيار آهي</h3>'+
+      '<p style="color:#7799bb;font-size:.7rem;margin:0 0 12px;">👤 '+( name||uid)+' ا مدت: '+durText+' ا ID: '+uid+'</p>'+
+      '<div style="background:#060610;border:1px solid #2a2a4a;border-radius:8px;padding:10px;word-break:break-all;font-size:.58rem;color:#aabbcc;direction:ltr;max-height:100px;overflow:auto;user-select:all;">'+link+'</div>'+
+      '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">'+
+      '<button id="vzLinkCopyBtn" style="background:#5500aa;border:none;color:#fff;padding:9px 16px;border-radius:8px;font-size:.8rem;cursor:pointer;">📋 لنڪ ڪاپي ڪريو</button>'+
+      '<button onclick="document.getElementById('vzLinkModal').remove()" style="background:#1a1a2a;border:1px solid #4a4a6a;color:#aaa;padding:9px 16px;border-radius:8px;font-size:.8rem;cursor:pointer;">بند</button>'+
+      '</div>'+
+      '<p style="color:#445566;font-size:.62rem;margin-top:10px;">⚠️ اهو لنڪ صرف انهي يوزر وٽ موڪليو — پبلڪ نه ڪريو</p>'+
+      '</div>';
+    document.body.appendChild(m);
+    document.getElementById('vzLinkCopyBtn').onclick=function(){
+      navigator.clipboard.writeText(link).then(()=>toast('✅ لنڪ ڪاپي ۳یو')).catch(()=>{
+        const ta=document.createElement('textarea');ta.value=link;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('✅ ڪاپي ۳یو');
+      });
+    };
+  };
+
+  // Periodic blocklist recheck every 10 min while online
+  (function(){
+    async function _recheckBlock(){
+      try{
+        if(!navigator.onLine)return;
+        const uid=await _vzGet('vz_user_id');if(!uid)return;
+        const r=await fetch('https://raw.githubusercontent.com/newspilot47-beep/newspilot47-beep.github.io/main/blocked.json?_='+Date.now(),{cache:'no-store'});
+        if(!r.ok)return;
+        const d=await r.json();
+        if((d.blocked||[]).includes(uid)){
+          document.body.innerHTML='<div style="position:fixed;inset:0;background:#07070e;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;color:#fff;text-align:center;padding:20px;"><div style="font-size:3rem;">🔒</div><h2 style="color:#ff4444;margin:0;">Access Disabled</h2><p style="color:#888;font-size:.9rem;">توهان جي رسائي بند ڪئي وئي آهي</p></div>';
+        }
+      }catch(e){}
+    }
+    setInterval(_recheckBlock,10*60*1000);
+    window.addEventListener('online',()=>setTimeout(_recheckBlock,3000));
+  })();
+  </script>
+  </body>
 </html>

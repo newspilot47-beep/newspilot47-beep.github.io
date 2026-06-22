@@ -1,0 +1,67 @@
+name: Telegram Bot Control
+  on:
+    schedule:
+      - cron: '*/15 * * * *'
+    workflow_dispatch:
+  permissions:
+    contents: write
+  jobs:
+    process-commands:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Process Telegram off/on commands
+          env:
+            TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          run: |
+            python3 - <<'EOF'
+  import json, urllib.request, os, re, datetime
+
+  TG_TOKEN = os.environ.get('TG_TOKEN','')
+  if not TG_TOKEN:
+      print("No TG_TOKEN"); exit(0)
+
+  try:
+      r = urllib.request.urlopen(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates?offset=-30&limit=30", timeout=10)
+      data = json.loads(r.read())
+  except Exception as e:
+      print(f"Error: {e}"); exit(0)
+
+  if not data.get('ok'): exit(0)
+
+  try:
+      with open('blocked.json','r') as f: bl = json.load(f)
+  except: bl = {"blocked": []}
+
+  changed = False
+  pat = re.compile(r'VZG-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}', re.I)
+
+  for upd in data.get('result', []):
+      msg = upd.get('message') or upd.get('edited_message')
+      if not msg: continue
+      txt = msg.get('text','').strip()
+      ids = pat.findall(txt.upper())
+      if not ids: continue
+      lo = txt.lower()
+      for uid in ids:
+          if ' off' in lo or lo.startswith('off') or lo.endswith('off'):
+              if uid not in bl['blocked']:
+                  bl['blocked'].append(uid); changed = True; print(f"BLOCKED: {uid}")
+          elif ' on' in lo or lo.startswith('on') or lo.endswith('on'):
+              if uid in bl['blocked']:
+                  bl['blocked'].remove(uid); changed = True; print(f"UNBLOCKED: {uid}")
+
+  if changed:
+      bl['updated'] = datetime.datetime.utcnow().isoformat()+'Z'
+      with open('blocked.json','w') as f: json.dump(bl, f, indent=2)
+      print("Updated blocklist:", bl['blocked'])
+  else:
+      print("No commands found")
+  EOF
+        - name: Commit blocklist update
+          run: |
+            git config user.email "bot@github.com"
+            git config user.name "News Pilot Bot"
+            git add blocked.json
+            git diff --staged --quiet || (git commit -m "bot: update blocklist" && git push)
+  
